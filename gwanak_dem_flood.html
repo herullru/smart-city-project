@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>관악구 지형 및 침수흔적도 융합 분석</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --panel-bg: rgba(15, 23, 42, 0.88);
+            --border: rgba(255,255,255,0.1);
+            --text: #f8fafc;
+            --muted: #94a3b8;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
+        body { background: var(--bg-dark); overflow: hidden; }
+
+        #map { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+
+        #panel {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            width: 360px;
+            background: var(--panel-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 28px;
+            z-index: 1000;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+            animation: slideIn 0.5s ease-out;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        @keyframes slideIn {
+            from { opacity:0; transform: translateX(40px); }
+            to   { opacity:1; transform: translateX(0); }
+        }
+
+        header h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #fff, #94a3b8);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 5px;
+        }
+        header p { font-size: 0.85rem; color: var(--muted); }
+
+        .colorbar-section h3 {
+            font-size: 0.9rem; font-weight: 600;
+            color: #e2e8f0; margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+        .colorbar {
+            height: 14px;
+            border-radius: 7px;
+            background: linear-gradient(to right,
+                #1e40af, #3b82f6, #06b6d4, #10b981, #84cc16, #eab308, #f97316, #ef4444);
+            margin-bottom: 6px;
+        }
+        .colorbar-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        .filter-section h3 {
+            font-size: 0.9rem; font-weight: 600;
+            color: #e2e8f0; margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+        .threshold-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .threshold-row label { font-size: 0.85rem; color: var(--muted); white-space: nowrap; }
+        input[type=range] {
+            flex: 1;
+            accent-color: #3b82f6;
+            cursor: pointer;
+        }
+        #threshold-val {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #60a5fa;
+            min-width: 30px;
+            text-align: right;
+        }
+        .hint { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .toggle-label { font-size: 0.85rem; color: #e2e8f0; flex: 1;}
+        .toggle-switch {
+            position: relative; width: 40px; height: 22px;
+        }
+        .toggle-switch input { display: none; }
+        .toggle-slider {
+            position: absolute; inset: 0;
+            background: rgba(255,255,255,0.1);
+            border-radius: 22px;
+            cursor: pointer;
+            transition: .3s;
+        }
+        .toggle-slider:before {
+            content: ''; position: absolute;
+            height: 16px; width: 16px;
+            left: 3px; bottom: 3px;
+            background: white; border-radius: 50%;
+            transition: .3s;
+        }
+        input:checked + .toggle-slider { background: #3b82f6; }
+        input:checked + .toggle-slider:before { transform: translateX(18px); }
+
+        .legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #e2e8f0; margin-top: 8px; }
+        .color-box { width: 16px; height: 16px; border-radius: 4px; }
+        .flood-zone { background: rgba(239, 68, 68, 0.35); border: 1.5px dashed #ef4444; }
+
+        /* Tooltip */
+        .leaflet-tooltip.elev-tip {
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            color: #fff;
+            font-size: 0.85rem;
+            padding: 6px 10px;
+            border-radius: 8px;
+        }
+        .custom-popup {
+            background: var(--panel-bg);
+            color: #fff;
+            padding: 5px;
+            border-radius: 5px;
+        }
+        .custom-popup h4 { margin: 0 0 5px 0; color: #f8fafc; }
+        .danger-text { color: #ef4444; font-weight: bold; margin: 0; font-size: 0.85rem;}
+        .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="panel">
+    <header>
+        <h1>지형 및 침수흔적도 융합 분석</h1>
+        <p>관악구 상대적 고도(DEM)와 2022년 침수 구역 비교</p>
+    </header>
+
+    <div class="colorbar-section">
+        <h3>상대적 지형 고도 (DEM)</h3>
+        <div class="colorbar"></div>
+        <div class="colorbar-labels">
+            <span>저지대 (낮음)</span>
+            <span>고지대 (높음)</span>
+        </div>
+        <div class="legend-item" style="margin-top: 15px;">
+            <span class="color-box flood-zone"></span> 2022년 과거 침수흔적도
+        </div>
+    </div>
+
+    <div class="filter-section">
+        <h3>저지대 임계값 필터 (DEM)</h3>
+        <div class="threshold-row">
+            <label>하위 <span id="threshold-val">100</span>%만 표시</label>
+            <input type="range" id="threshold" min="10" max="100" value="100" step="5">
+        </div>
+        <p class="hint">슬라이더를 낮추면 더 낮은 지역만 강조됩니다.</p>
+        
+        <hr style="border:0; border-top:1px solid var(--border); margin: 15px 0;">
+        
+        <h3>레이어 토글</h3>
+        <div class="toggle-row">
+            <label class="toggle-switch">
+                <input type="checkbox" id="toggle-dem" checked>
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-label">상대적 경사도 (DEM) 표시</span>
+        </div>
+        <div class="toggle-row">
+            <label class="toggle-switch">
+                <input type="checkbox" id="toggle-flood" checked>
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-label">2022년 침수흔적도 표시</span>
+        </div>
+        <div class="toggle-row">
+            <label class="toggle-switch">
+                <input type="checkbox" id="toggle-boundary" checked>
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-label">관악구 경계선</span>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="../data/gwanak_dem_grid.js"></script>
+<script src="../data/gwanak_floods.js"></script>
+<script src="../data/gwanak_boundary.js"></script>
+<script>
+// === Map Init ===
+const map = L.map('map', { preferCanvas: true, zoomControl: false, minZoom: 12, maxZoom: 18 })
+    .setView([37.478, 126.951], 13);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap contributors © CARTO',
+    subdomains: 'abcd', maxZoom: 19
+}).addTo(map);
+
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+// === Color Scale: Blue → Cyan → Green → Yellow → Orange → Red ===
+function elevColor(norm) {
+    const stops = [
+        [0,    [30,  64, 175]],   // deep blue
+        [0.15, [59, 130, 246]],   // blue
+        [0.3,  [6,  182, 212]],   // cyan
+        [0.45, [16, 185, 129]],   // teal-green
+        [0.6,  [132,204,  22]],   // lime
+        [0.72, [234,179,   8]],   // yellow
+        [0.85, [249,115,  22]],   // orange
+        [1.0,  [239, 68,  68]],   // red
+    ];
+    for (let i = 0; i < stops.length - 1; i++) {
+        const [t0, c0] = stops[i];
+        const [t1, c1] = stops[i + 1];
+        if (norm >= t0 && norm <= t1) {
+            const f = (norm - t0) / (t1 - t0);
+            const r = Math.round(c0[0] + f*(c1[0]-c0[0]));
+            const g = Math.round(c0[1] + f*(c1[1]-c0[1]));
+            const b = Math.round(c0[2] + f*(c1[2]-c0[2]));
+            return `rgb(${r},${g},${b})`;
+        }
+    }
+    return 'rgb(239,68,68)';
+}
+
+// === Render DEM ===
+let demGroup = L.layerGroup().addTo(map);
+let demRects = [];
+let threshold = 1.0;
+
+function renderDEM() {
+    demGroup.clearLayers();
+    demRects = [];
+
+    if (typeof demGrid === 'undefined') return;
+
+    demGrid.forEach(cell => {
+        if (cell.norm > threshold) return; 
+
+        const opacity = 0.5 + (1 - cell.norm / Math.max(threshold, 0.1)) * 0.3; 
+        const color = elevColor(cell.norm);
+        const rect = L.rectangle(cell.bounds, {
+            color: 'transparent',
+            fillColor: color,
+            fillOpacity: opacity,
+            weight: 0
+        });
+        rect.bindTooltip(`표고: ${cell.elev}m`, { className: 'elev-tip', sticky: true });
+        demGroup.addLayer(rect);
+        demRects.push(rect);
+    });
+    
+    // Ensure flood traces always stay on top of the newly rendered DEM grid
+    if (floodLayer && map.hasLayer(floodLayer)) {
+        floodLayer.bringToFront();
+    }
+}
+
+// === Render Flood Traces ===
+let floodLayer;
+if (typeof floodData !== 'undefined') {
+    floodLayer = L.geoJSON(floodData, {
+        style: function (feature) {
+            return {
+                color: '#ef4444',
+                weight: 3,
+                opacity: 1.0,
+                fillColor: '#ef4444',
+                fillOpacity: 0.65,
+                dashArray: '4'
+            };
+        },
+        onEachFeature: function (feature, layer) {
+            layer.bindPopup(`
+                <div class="custom-popup">
+                    <h4>2022년 침수흔적</h4>
+                    <p class="danger-text">주의: 과거 침수 발생 지역</p>
+                </div>
+            `);
+        }
+    }).addTo(map);
+}
+
+// === Render Boundary ===
+let boundaryLayer;
+if (typeof boundaryData !== 'undefined') {
+    boundaryLayer = L.geoJSON(boundaryData, {
+        style: { color: '#8b5cf6', weight: 3, opacity: 0.8, fillColor: 'transparent', dashArray: '6,5' },
+        interactive: false,
+        onEachFeature: function(feature, layer) {
+            const code = feature.properties.EMD_CD;
+            const names = { '11620101': '봉천동', '11620102': '신림동', '11620103': '남현동' };
+            const name = names[code];
+            if (name) layer.bindTooltip(name, { permanent: true, direction: 'center', className: 'elev-tip' });
+        }
+    }).addTo(map);
+    boundaryLayer.bringToBack();
+}
+
+// === Controls ===
+const slider = document.getElementById('threshold');
+const valLabel = document.getElementById('threshold-val');
+
+slider.addEventListener('input', () => {
+    threshold = parseInt(slider.value) / 100;
+    valLabel.textContent = slider.value;
+    renderDEM();
+});
+
+document.getElementById('toggle-dem').addEventListener('change', e => {
+    if (e.target.checked) map.addLayer(demGroup);
+    else map.removeLayer(demGroup);
+});
+
+document.getElementById('toggle-flood').addEventListener('change', e => {
+    if (e.target.checked && floodLayer) {
+        map.addLayer(floodLayer);
+        floodLayer.bringToFront();
+    }
+    else if (floodLayer) map.removeLayer(floodLayer);
+});
+
+document.getElementById('toggle-boundary').addEventListener('change', e => {
+    if (e.target.checked && boundaryLayer) map.addLayer(boundaryLayer);
+    else if (boundaryLayer) map.removeLayer(boundaryLayer);
+});
+
+// Initial render
+renderDEM();
+</script>
+</body>
+</html>
